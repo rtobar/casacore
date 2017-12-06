@@ -1243,11 +1243,24 @@ void Coordinate::xFormToPC (::wcsprm& wcs, const Matrix<Double>& xform) const
 }
 
 
+// Starting with version 5.18, wcslib is fully thread-safe
+// for the purposes of casa_coordinates. In that case we don't need
+// to serialize wcslib calls anymore
+#if (WCSLIB_VERSION_MAJOR < 5) || (WCSLIB_VERSION_MAJOR == 5 && WCSLIB_VERSION_MINOR < 18)
+#define WCSLIB_IS_THREAD_UNSAFE
+#else
+#undef WCSLIB_IS_THREAD_UNSAFE
+#endif // WCSLIB_VERSION < 5.18
+
+#ifdef WCSLIB_IS_THREAD_UNSAFE
 static Mutex wcslib_mutex;
+#endif // WCSLIB_IS_THREAD_UNSAFE
 
 void Coordinate::set_wcs (::wcsprm& wcs)
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     if (int iret = wcsset(&wcs)) {
         String errmsg = "wcs wcsset error: ";
         errmsg += wcsset_errmsg[iret];
@@ -1259,7 +1272,9 @@ void Coordinate::mix_wcs (::wcsprm& wcs, int mixpix, int mixcel, const double vs
         double vstep, int viter, double world[], double phi[],
         double theta[], double imgcrd[], double pixcrd[])
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     if (int iret = wcsmix(&wcs, mixpix, mixcel, vspan, vstep, viter, world, phi,
                           theta, imgcrd, pixcrd)) {
         String errmsg = "wcs wcsmix error: ";
@@ -1270,13 +1285,17 @@ void Coordinate::mix_wcs (::wcsprm& wcs, int mixpix, int mixcel, const double vs
 
 int Coordinate::fix_wcs (::wcsprm& wcs, int ctrl, int naxis[], int stat[])
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     return wcsfix(ctrl, naxis, &wcs, stat);
 }
 
 ::wcsprm *Coordinate::pih_wcs (char *header, int nkeyrec, int relax, int ctrl, int &nreject, int &nwcs)
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     ::wcsprm *wcs = 0;
     if (int ret = wcspih(header, nkeyrec, relax, ctrl, &nreject, &nwcs, &wcs))
     {
@@ -1289,7 +1308,9 @@ int Coordinate::fix_wcs (::wcsprm& wcs, int ctrl, int naxis[], int stat[])
 
 int Coordinate::sptr_wcs(::wcsprm &wcs, int &i, char ctype[9])
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     return wcssptr(&wcs, &i, ctype);
 }
 
@@ -1297,7 +1318,9 @@ void Coordinate::p2s_wcs(::wcsprm &wcs, int ncoord, int nelem, const double pixc
         double imgcrd[], double phi[], double theta[], double world[],
         int stat[])
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     if (int iret = wcsp2s(&wcs, ncoord, nelem, pixcrd, imgcrd, phi, theta, world, stat)) {
         String errmsg = "wcs wcsp2s error: ";
         errmsg += wcsp2s_errmsg[iret];
@@ -1308,7 +1331,9 @@ void Coordinate::p2s_wcs(::wcsprm &wcs, int ncoord, int nelem, const double pixc
 void Coordinate::s2p_wcs(::wcsprm &wcs, int ncoord, int nelem, const double world[],
         double phi[], double theta[], double imgcrd[], double pixcrd[], int stat[])
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     if (int iret = wcss2p(&wcs, ncoord, nelem, world, phi, theta, imgcrd, pixcrd, stat)) {
         String errmsg = "wcs wcsp2s error: ";
         errmsg += wcss2p_errmsg[iret];
@@ -1318,7 +1343,9 @@ void Coordinate::s2p_wcs(::wcsprm &wcs, int ncoord, int nelem, const double worl
 
 void Coordinate::init_wcs(::wcsprm& wcs, int naxis)
 {
+#ifdef WCSLIB_IS_THREAD_UNSAFE
     ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
     if (int iret = wcsini(1, naxis, &wcs)) {
         String errmsg = "wcs wcsini error: ";
         errmsg += wcsini_errmsg[iret];
@@ -1328,8 +1355,9 @@ void Coordinate::init_wcs(::wcsprm& wcs, int naxis)
 
 void Coordinate::sub_wcs(const ::wcsprm &src, int &nsub, int axes[], ::wcsprm &dst)
 {
-	// see init_wcs
+#ifdef WCSLIB_IS_THREAD_UNSAFE
 	ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
 	if (int iret = wcssub(1, &src, &nsub, axes, &dst)) {
 		String errmsg = "wcslib wcssub error: ";
 		errmsg += wcssub_errmsg[iret];
@@ -1339,8 +1367,9 @@ void Coordinate::sub_wcs(const ::wcsprm &src, int &nsub, int axes[], ::wcsprm &d
 
 void Coordinate::copy_wcs(const ::wcsprm &src, ::wcsprm &dst)
 {
-	// see init_wcs
+#ifdef WCSLIB_IS_THREAD_UNSAFE
 	ScopedMutexLock lock(wcslib_mutex);
+#endif // WCSLIB_IS_THREAD_UNSAFE
 	if (int iret = wcssub(1, &src, 0, 0, &dst)) {
 		String errmsg = "wcslib wcscopy error: ";
 		errmsg += wcscopy_errmsg[iret];

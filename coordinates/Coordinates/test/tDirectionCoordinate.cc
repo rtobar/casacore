@@ -92,7 +92,7 @@ void _create_many_coordinates()
 
 void test_multithreaded_behaviour()
 {
-	std::cout << "*** Test multithreaded coordinate creation" << std::endl;
+	std::cout << "*** Test multithreaded coordinate creation with wcslib " << WCSLIB_VERSION_MAJOR << "." << WCSLIB_VERSION_MINOR << std::endl;
 	auto t1 = std::thread(_create_many_coordinates);
 	auto t2 = std::thread(_create_many_coordinates);
 	t1.join();
