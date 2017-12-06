@@ -627,11 +627,13 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 	int nrej = 0;
 	int nwcs = 0;
 	int ctrl = -2;
-	int status = wcspih(pChar2, nkeys, relax, ctrl, &nrej, &nwcs, &wcsPtr);
-	if (status!=0) {
-	    os << LogIO::SEVERE << "wcs FITS parse error with error code " << status << LogIO::POST;
+	try {
+	    wcsPtr = Coordinate::pih_wcs(pChar2, nkeys, relax, ctrl, nrej, nwcs);
+	} catch (const AipsError &e) {
+	    os << LogIO::SEVERE << "wcs FITS parse error: " << e.what() << LogIO::POST;
 	    return False;
 	}
+
 	if (uInt(nwcs) == 0) {
 	    os << LogIO::NORMAL << "No WCS compliant coordinate representation found. Will try to continue ..." << LogIO::POST;
 	    cardsToRecord (os, recHeader, pChar2);
@@ -694,7 +696,7 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
 	Bool doAbort=False;
 	uInt eCount=0;
-        if (wcsfix(ctrl, &(tmpshp[0]), &wcsPtr[which], stat) > 0) {
+        if (Coordinate::fix_wcs(wcsPtr[which], ctrl, &(tmpshp[0]), stat) > 0) {
 	    for (int i=0; i<NWCSFIX; i++) {
 		int err = stat[i];
 		if (err>0) {
@@ -708,8 +710,7 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 	    if(eCount>1 || doAbort) {
 		os << LogIO::WARN << "The wcs function failures are too severe to continue ..." <<  LogIO::POST;
 
-		status = wcsvfree(&nwcs, &wcsPtr);
-		if (status!=0) {
+		if (wcsvfree(&nwcs, &wcsPtr)!=0) {
 		    String errmsg = "wcs memory deallocation error: ";
 		    os << errmsg << LogIO::EXCEPTION;
 		}
@@ -770,8 +771,7 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
 // Free up wcs memory
 
-	status = wcsvfree(&nwcs, &wcsPtr);
-	if (status!=0) {
+	if (wcsvfree(&nwcs, &wcsPtr)!=0) {
 	    String errmsg = "wcs memory deallocation error: ";
 	    os << errmsg << LogIO::EXCEPTION;
 	}
@@ -1194,7 +1194,7 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 		
 		if (ok) {
 		    int status = 0;
-		    if ((status=wcssptr(&wcsDest, &index, ctype))) {
+		    if ((status=Coordinate::sptr_wcs(wcsDest, index, ctype))) {
 			os << LogIO::WARN << "Failed to convert Spectral coordinate to Frequency, error status = "
 			    
 			   << status << ": " << endl << "   " << wcs_errmsg[status] << endl;

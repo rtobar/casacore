@@ -483,6 +483,30 @@ public:
     // Call wcsset on the wcs structure
     static void set_wcs (::wcsprm& wcs);
 
+    // Call wcsmix on the wcs structure
+    static void mix_wcs (::wcsprm& wcs, int mixpix, int mixcel, const double vspan[],
+            double vstep, int viter, double world[], double phi[],
+            double theta[], double imgcrd[], double pixcrd[]);
+
+    // Call wcsfix on the wcs structure. It doesn't raise an exception, returning
+    // the original return value instead
+    static int fix_wcs (::wcsprm& wcs, int ctrl, int naxis[], int stat[]);
+
+    // Call wcspih on the wcs structure. it returns the newly allocated array of wcsprm values
+    static ::wcsprm *pih_wcs (char *header, int nkeyrec, int relax, int ctrl, int &nreject, int &nwcs);
+
+    // Call wcssptr on the wcs structure. It doesn't raise an exception, returning
+    // the original return value instead
+    static int sptr_wcs(::wcsprm &wcs, int &i, char ctype[]);
+
+    // Call wcsp2s on the wcs structure
+    static void p2s_wcs(::wcsprm &wcs, int ncoord, int nelem, const double pixcrd[],
+            double imgcrd[], double phi[], double theta[], double world[], int stat[]);
+
+    // Call wcss2p on the wcs structure
+    static void s2p_wcs(::wcsprm &wcs, int ncoord, int nelem, const double world[],
+            double phi[], double theta[], double imgcrd[], double pixcrd[], int stat[]);
+
     // Call wcsini on the wcs structure
     static void init_wcs (::wcsprm& wcs, int naxis);
 

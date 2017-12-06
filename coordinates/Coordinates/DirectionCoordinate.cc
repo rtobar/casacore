@@ -1614,13 +1614,12 @@ Bool DirectionCoordinate::toMix2(Vector<Double>& out,
 //    mix_vstep = 1.0;
     mix_vstep = 0.0;
     mix_viter = 5;
-    int iret = wcsmix(&wcs_p, mixpix, mixcel, mix_vspan, mix_vstep, mix_viter,
-                      mix_world, &mix_phi, &mix_theta, mix_imgcrd,
-                      mix_pixcrd);
-    if (iret!=0) {
-        errorMsg= "wcs wcsmix_error: ";
-        errorMsg += wcsmix_errmsg[iret];
-        set_error(errorMsg);
+    try {
+        mix_wcs(wcs_p, mixpix, mixcel, mix_vspan, mix_vstep, mix_viter,
+                mix_world, &mix_phi, &mix_theta, mix_imgcrd,
+                mix_pixcrd);
+    } catch (const AipsError &e) {
+        set_error(e.what());
         return False;
     }
 //

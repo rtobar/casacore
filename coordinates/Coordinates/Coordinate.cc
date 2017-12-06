@@ -48,6 +48,9 @@
 #include <casacore/casa/iomanip.h>  
 #include <casacore/casa/sstream.h>
 
+#include <wcslib/wcshdr.h>
+#include <wcslib/wcsfix.h>
+
 namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
 Coordinate::Coordinate()
@@ -971,22 +974,22 @@ Bool Coordinate::toWorldWCS (Vector<Double>& world, const Vector<Double>& pixel,
 //
     Block<double> imgCrd(nAxes);
     double phi;
+    int stat;
     double theta=0;   // initialize, because wcslib not always sets theta
 // Convert from pixel to world with wcs units
 
-    int stat;
-    int iret = wcsp2s (&wcs, 1, nAxes, pixelStore, imgCrd.storage(),
-		       &phi, &theta, worldStore, &stat);
+    Bool success = True;
+    try {
+        p2s_wcs(wcs, 1, nAxes, pixelStore, imgCrd.storage(), &phi, &theta, worldStore, &stat);
+    } catch (const AipsError &e) {
+        set_error(e.what());
+        success = False;
+    }
+
     pixel.freeStorage(pixelStore, delPixel);
     world.putStorage(worldStore, delWorld);
-//
-    if (iret!=0) {
-       String errorMsg = String("wcslib wcsp2s error: ") + wcsp2s_errmsg[iret];
-       set_error(errorMsg);
-       return False;
-    }
-//
-    return True;
+
+    return success;
 }
 
 
@@ -1009,20 +1012,20 @@ Bool Coordinate::toPixelWCS(Vector<Double> &pixel, const Vector<Double> &world,
    double theta;
     
 // Convert with world with wcs units to pixel
-    
+
+   Bool success = True;
    int stat;
-   int iret = wcss2p (&wcs, 1, nAxes, worldStore, &phi, &theta,
-		      imgCrd.storage(), pixelStore, &stat);
+   try {
+       s2p_wcs(wcs, 1, nAxes, worldStore, &phi, &theta, imgCrd.storage(), pixelStore, &stat);
+   } catch (const AipsError &e) {
+       set_error(e.what());
+       success = False;
+   }
+
    pixel.putStorage(pixelStore, delPixel);
    world.freeStorage(worldStore, delWorld);
-//
-   if (iret!=0) {
-      String errorMsg = String("wcslib wcss2p error: ") + wcss2p_errmsg[iret];
-      set_error(errorMsg);
-      return False;
-   }
-//
-   return True;
+
+   return success;
 }
 
 
@@ -1055,7 +1058,14 @@ Bool Coordinate::toWorldManyWCS (Matrix<Double>& world, const Matrix<Double>& pi
     Double* pTheta = theta.getStorage(deleteTheta);    
     Int* pStat = stat.getStorage(deleteStat);    
 //
-    int iret = wcsp2s (&wcs, nTransforms, nAxes, pPixel, pImgCrd, pPhi, pTheta, pWorld, pStat);
+    Bool success = True;
+    try {
+       p2s_wcs(wcs, nTransforms, nAxes, pPixel, pImgCrd, pPhi, pTheta, pWorld, pStat);
+    } catch (const AipsError &e) {
+       set_error(e.what());
+       success = False;
+    }
+
     for (uInt i=0; i<nTransforms; i++) {
        failures[i] = pStat[i]!=0;
     }
@@ -1067,14 +1077,7 @@ Bool Coordinate::toWorldManyWCS (Matrix<Double>& world, const Matrix<Double>& pi
     theta.putStorage(pTheta, deleteTheta);
     stat.putStorage(pStat, deleteStat);
 //
-    if (iret!=0) {
-        String errorMsg= "wcs wcsp2s_error: ";
-        errorMsg += wcsp2s_errmsg[iret];
-        set_error(errorMsg);
-        return False;
-    }
-//
-    return True;
+    return success;
 }     
 
 
@@ -1107,7 +1110,14 @@ Bool Coordinate::toPixelManyWCS (Matrix<Double>& pixel, const Matrix<Double>& wo
 // Convert from wcs units to pixel
 
     const int nC = nTransforms;
-    int iret = wcss2p (&wcs, nC, nAxes, pWorld, pPhi, pTheta, pImgCrd, pPixel, pStat);
+    Bool success = True;
+    try {
+       s2p_wcs(wcs, nC, nAxes, pWorld, pPhi, pTheta, pImgCrd, pPixel, pStat);
+    } catch (const AipsError &e) {
+       set_error(e.what());
+       success = False;
+    }
+
     for (uInt i=0; i<nTransforms; i++) {
        failures[i] = pStat[i]!=0;
     }
@@ -1119,13 +1129,7 @@ Bool Coordinate::toPixelManyWCS (Matrix<Double>& pixel, const Matrix<Double>& wo
     theta.putStorage(pTheta, deleteTheta);
     stat.putStorage(pStat, deleteStat);
 //
-    if (iret!=0) {
-        String errorMsg= "wcs wcss2p_error: ";
-        errorMsg += wcss2p_errmsg[iret];
-        set_error(errorMsg);
-        return False;
-    }
-    return True;
+    return success;
 }
   
 
@@ -1239,37 +1243,84 @@ void Coordinate::xFormToPC (::wcsprm& wcs, const Matrix<Double>& xform) const
 }
 
 
+static Mutex wcslib_mutex;
+
 void Coordinate::set_wcs (::wcsprm& wcs)
 {
-    // wcsset calls wcsunitse, which in turn calls wcsulexe, which is thread-unsafe.
-    // (in wcslib 5.17, the latest version at the time of writing, but probably
-    // in all previous versions as well). Thus, this call needs to be protected
-    static Mutex wcsset_mutex;
-    ScopedMutexLock lock(wcsset_mutex);
+    ScopedMutexLock lock(wcslib_mutex);
     if (int iret = wcsset(&wcs)) {
-        String errmsg = "wcs wcsset_error: ";
+        String errmsg = "wcs wcsset error: ";
         errmsg += wcsset_errmsg[iret];
         throw(AipsError(errmsg));
     }
 }
 
-#if (WCSLIB_VERSION_MAJOR == 5 && WCSLIB_VERSION_MINOR >= 7) || WCSLIB_VERSION_MAJOR > 5
-// In wcslib >= 5.7 wcssub internally calls wcssnpv/wcssnps to temporarily
-// set two global variables to a particular value before calling wcsini, which
-// in turn reads their values; after wcsini returns wcssub sets the variables to
-// their previous values. This situation creates a race condition between
-// concurrent, independent calls to wcssub and wcsini. Thus, we serialize them
-// with this lock
-static Mutex wcs_initsubcopy_mutex;
-#endif // WCSLIB_VERSION >= 5.7
+void Coordinate::mix_wcs (::wcsprm& wcs, int mixpix, int mixcel, const double vspan[],
+        double vstep, int viter, double world[], double phi[],
+        double theta[], double imgcrd[], double pixcrd[])
+{
+    ScopedMutexLock lock(wcslib_mutex);
+    if (int iret = wcsmix(&wcs, mixpix, mixcel, vspan, vstep, viter, world, phi,
+                          theta, imgcrd, pixcrd)) {
+        String errmsg = "wcs wcsmix error: ";
+        errmsg += wcsmix_errmsg[iret];
+        throw(AipsError(errmsg));
+    }
+}
+
+int Coordinate::fix_wcs (::wcsprm& wcs, int ctrl, int naxis[], int stat[])
+{
+    ScopedMutexLock lock(wcslib_mutex);
+    return wcsfix(ctrl, naxis, &wcs, stat);
+}
+
+::wcsprm *Coordinate::pih_wcs (char *header, int nkeyrec, int relax, int ctrl, int &nreject, int &nwcs)
+{
+    ScopedMutexLock lock(wcslib_mutex);
+    ::wcsprm *wcs = 0;
+    if (int ret = wcspih(header, nkeyrec, relax, ctrl, &nreject, &nwcs, &wcs))
+    {
+        String errmsg = "wcs wcspih error: ";
+        errmsg += ret;
+        throw AipsError(errmsg);
+    }
+    return wcs;
+}
+
+int Coordinate::sptr_wcs(::wcsprm &wcs, int &i, char ctype[9])
+{
+    ScopedMutexLock lock(wcslib_mutex);
+    return wcssptr(&wcs, &i, ctype);
+}
+
+void Coordinate::p2s_wcs(::wcsprm &wcs, int ncoord, int nelem, const double pixcrd[],
+        double imgcrd[], double phi[], double theta[], double world[],
+        int stat[])
+{
+    ScopedMutexLock lock(wcslib_mutex);
+    if (int iret = wcsp2s(&wcs, ncoord, nelem, pixcrd, imgcrd, phi, theta, world, stat)) {
+        String errmsg = "wcs wcsp2s error: ";
+        errmsg += wcsp2s_errmsg[iret];
+        throw(AipsError(errmsg));
+    }
+}
+
+void Coordinate::s2p_wcs(::wcsprm &wcs, int ncoord, int nelem, const double world[],
+        double phi[], double theta[], double imgcrd[], double pixcrd[], int stat[])
+{
+    ScopedMutexLock lock(wcslib_mutex);
+    if (int iret = wcss2p(&wcs, ncoord, nelem, world, phi, theta, imgcrd, pixcrd, stat)) {
+        String errmsg = "wcs wcsp2s error: ";
+        errmsg += wcss2p_errmsg[iret];
+        throw(AipsError(errmsg));
+    }
+}
 
 void Coordinate::init_wcs(::wcsprm& wcs, int naxis)
 {
-#if (WCSLIB_VERSION_MAJOR == 5 && WCSLIB_VERSION_MINOR >= 7) || WCSLIB_VERSION_MAJOR > 5
-    ScopedMutexLock lock(wcs_initsubcopy_mutex);
-#endif // WCSLIB_VERSION >= 5.7
+    ScopedMutexLock lock(wcslib_mutex);
     if (int iret = wcsini(1, naxis, &wcs)) {
-        String errmsg = "wcs wcsini_error: ";
+        String errmsg = "wcs wcsini error: ";
         errmsg += wcsini_errmsg[iret];
         throw(AipsError(errmsg));
     }
@@ -1278,12 +1329,10 @@ void Coordinate::init_wcs(::wcsprm& wcs, int naxis)
 void Coordinate::sub_wcs(const ::wcsprm &src, int &nsub, int axes[], ::wcsprm &dst)
 {
 	// see init_wcs
-#if (WCSLIB_VERSION_MAJOR == 5 && WCSLIB_VERSION_MINOR >= 7) || WCSLIB_VERSION_MAJOR > 5
-    ScopedMutexLock lock(wcs_initsubcopy_mutex);
-#endif // WCSLIB_VERSION >= 5.7
+	ScopedMutexLock lock(wcslib_mutex);
 	if (int iret = wcssub(1, &src, &nsub, axes, &dst)) {
 		String errmsg = "wcslib wcssub error: ";
-		errmsg += wcsini_errmsg[iret];
+		errmsg += wcssub_errmsg[iret];
 		throw(AipsError(errmsg));
 	}
 }
@@ -1291,12 +1340,10 @@ void Coordinate::sub_wcs(const ::wcsprm &src, int &nsub, int axes[], ::wcsprm &d
 void Coordinate::copy_wcs(const ::wcsprm &src, ::wcsprm &dst)
 {
 	// see init_wcs
-#if (WCSLIB_VERSION_MAJOR == 5 && WCSLIB_VERSION_MINOR >= 7) || WCSLIB_VERSION_MAJOR > 5
-	ScopedMutexLock lock(wcs_initsubcopy_mutex);
-#endif // WCSLIB_VERSION >= 5.7
+	ScopedMutexLock lock(wcslib_mutex);
 	if (int iret = wcssub(1, &src, 0, 0, &dst)) {
 		String errmsg = "wcslib wcscopy error: ";
-		errmsg += wcsini_errmsg[iret];
+		errmsg += wcscopy_errmsg[iret];
 		throw(AipsError(errmsg));
 	}
 }
