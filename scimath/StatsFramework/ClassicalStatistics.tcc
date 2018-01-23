@@ -22,7 +22,6 @@
 //#                        520 Edgemont Road
 //#                        Charlottesville, VA 22903-2475 USA
 //#
-//# $Id: Array.h 21545 2015-01-22 19:36:35Z gervandiepen $
 
 #ifndef SCIMATH_CLASSICALSTATISTICS_TCC
 #define SCIMATH_CLASSICALSTATISTICS_TCC
@@ -45,7 +44,7 @@ CASA_STATD
 ClassicalStatistics<CASA_STATP>::ClassicalStatistics()
     : StatisticsAlgorithm<CASA_STATP>(),
       _statsData(initializeStatsData<AccumType>()),
-      _idataset(0), _calculateAsAdded(False), _doMaxMin(True),
+      _calculateAsAdded(False), _doMaxMin(True),
       _doMedAbsDevMed(False), _mustAccumulate(False) {
     reset();
 }
@@ -57,11 +56,9 @@ CASA_STATD
 ClassicalStatistics<CASA_STATP>::ClassicalStatistics(
     const ClassicalStatistics<CASA_STATP>& cs
 ) : StatisticsAlgorithm<CASA_STATP>(cs),
-    _statsData(cs._statsData),
-    _idataset(cs._idataset),_calculateAsAdded(cs._calculateAsAdded),
-    _doMaxMin(cs._doMaxMin), _doMedAbsDevMed(cs._doMedAbsDevMed), _mustAccumulate(cs._mustAccumulate),
-    _hasData(cs._hasData) {
-}
+    _statsData(cs._statsData), _calculateAsAdded(cs._calculateAsAdded),
+    _doMaxMin(cs._doMaxMin), _doMedAbsDevMed(cs._doMedAbsDevMed),
+    _mustAccumulate(cs._mustAccumulate) {}
 
 CASA_STATD
 ClassicalStatistics<CASA_STATP>&
@@ -73,12 +70,10 @@ ClassicalStatistics<CASA_STATP>::operator=(
     }
     StatisticsAlgorithm<CASA_STATP>::operator=(other);
     _statsData = copy(_statsData);
-    _idataset = other._idataset;
     _calculateAsAdded = other._calculateAsAdded;
     _doMaxMin = other._doMaxMin;
     _doMedAbsDevMed = other._doMedAbsDevMed;
     _mustAccumulate = other._mustAccumulate;
-    _hasData = other._hasData;
     return *this;
 }
 
@@ -304,13 +299,14 @@ CASA_STATD
 void ClassicalStatistics<CASA_STATP>::setCalculateAsAdded(
     Bool c
 ) {
+    const StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
     ThrowIf (
-        this->_getDataProvider() && c,
+        ds.getDataProvider() && c,
         "Logic Error: It is nonsensical to call " + String(__func__) + " method "
         "with a True value if one is using a data provider"
     );
     ThrowIf(
-        _idataset > 0,
+        ds.iDataset() > 0,
         "Logic Error: " + String(__func__)
         + " cannot be called after the first dataset has been set"
     );
@@ -328,15 +324,15 @@ void ClassicalStatistics<CASA_STATP>::setDataProvider(
         "setCalculateAsAdded(False), and then set the data provider"
     );
     StatisticsAlgorithm<CASA_STATP>::setDataProvider(dataProvider);
-    _hasData = True;
 }
 
 CASA_STATD
 void ClassicalStatistics<CASA_STATP>::setStatsToCalculate(
     std::set<StatisticsData::STATS>& stats
 ) {
+    const StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
     ThrowIf(
-        _calculateAsAdded && _idataset > 0,
+        _calculateAsAdded && ds.iDataset() > 0,
         "Cannot set stats to be calculated after setting the first dataset when "
         "stats are to be calculated as data are added"
     );
@@ -351,8 +347,8 @@ void ClassicalStatistics<CASA_STATP>::_addData() {
     this->_setSortedArray(std::vector<AccumType>());
     _getStatsData().median = NULL;
     _mustAccumulate = True;
-    _hasData = True;
     if (_calculateAsAdded) {
+        // just need to call it, don't need the return value here
         _getStatistics();
         StatisticsAlgorithm<CASA_STATP>::reset();
     }
@@ -362,13 +358,12 @@ CASA_STATD
 void ClassicalStatistics<CASA_STATP>::reset() {
     _clearStats();
     StatisticsAlgorithm<CASA_STATP>::reset();
-    _hasData = False;
 }
 
 CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_clearStats() {
     _statsData = initializeStatsData<AccumType>();
-    _idataset = 0;
+    this->_getDataset().resetIDataset();
     _doMedAbsDevMed = False;
     _mustAccumulate = True;
 }
@@ -453,16 +448,16 @@ AccumType ClassicalStatistics<CASA_STATP>::_getStatistic(
                 return qs[0.75] - qs[0.25];
             }
         default:
-        AccumType value;
-        Record r = toRecord(_getStatistics());
-        String statString = StatisticsData::toString(stat);
-        ThrowIf(
-            ! r.isDefined(statString),
-            "Logic Error: stat " + statString + " is not defined. "
-            "Please file a defect report"
-        );
-        r.get(statString, value);
-        return value;
+            AccumType value;
+            Record r = toRecord(_getStatistics());
+            String statString = StatisticsData::toString(stat);
+            ThrowIf(
+                ! r.isDefined(statString),
+                "Logic Error: stat " + statString + " is not defined. "
+                "Please file a defect report"
+            );
+            r.get(statString, value);
+            return value;
     }
 }
 
@@ -472,7 +467,8 @@ StatsData<AccumType> ClassicalStatistics<CASA_STATP>::_getStatistics() {
     if (! _mustAccumulate) {
         return copy(stats);
     }
-    _initIterators();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
     uInt nThreadsMax = _nThreadsMax();
     PtrHolder<StatsData<AccumType> > tStats(
         new StatsData<AccumType>[
@@ -488,21 +484,21 @@ StatsData<AccumType> ClassicalStatistics<CASA_STATP>::_getStatistics() {
         tStats[idx8].max = new AccumType(0);
     }
     while (True) {
-        _initLoopVars();
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
         uInt nBlocks, nthreads;
         uInt64 extra;
         PtrHolder<DataIterator> dataIter;
         PtrHolder<MaskIterator> maskIter;
         PtrHolder<WeightsIterator> weightsIter;
         PtrHolder<uInt64> offset;
-        _initThreadVars(
+        ds.initThreadVars(
             nBlocks, extra, nthreads, dataIter,
             maskIter, weightsIter, offset, nThreadsMax
         );
-        if (_hasWeights) {
+        if (chunk.weights) {
             stats.weighted = True;
         }
-        if (_hasMask) {
+        if (chunk.mask) {
             stats.masked = True;
         }
 #ifdef _OPENMP
@@ -511,14 +507,14 @@ StatsData<AccumType> ClassicalStatistics<CASA_STATP>::_getStatistics() {
         for (uInt i=0; i<nBlocks; ++i) {
             uInt64 ngood = 0;
             uInt idx8 = _threadIdx();
-            uInt64 dataCount = _myCount - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
+            uInt64 dataCount = chunk.count - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
                 ? extra : ClassicalStatisticsData::BLOCK_SIZE;
-            LocationType location(_idataset, offset[idx8]);
+            LocationType location(ds.iDataset(), offset[idx8]);
             _computeStats(
                 tStats[idx8], ngood, location, dataIter[idx8], maskIter[idx8],
-                weightsIter[idx8], dataCount
+                weightsIter[idx8], dataCount, chunk
             );
-            _incrementThreadIters(
+            ds.incrementThreadIters(
                 dataIter[idx8], maskIter[idx8], weightsIter[idx8],
                 offset[idx8], nthreads
             );
@@ -529,7 +525,7 @@ StatsData<AccumType> ClassicalStatistics<CASA_STATP>::_getStatistics() {
             uInt idx8 = ClassicalStatisticsData::CACHE_PADDING*tid;
             _updateDataProviderMaxMin(tStats[idx8]);
         }
-        if (_increment(True)) {
+        if (ds.increment(True)) {
             break;
         }
     }
@@ -575,130 +571,88 @@ StatsData<AccumType> ClassicalStatistics<CASA_STATP>::_getStatistics() {
 }
 
 CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_incrementThreadIters(
-    DataIterator& dataIter, MaskIterator& maskIter,
-    WeightsIterator& weightsIter, uInt64& offset, uInt nthreads
-) const {
-    uInt increment = nthreads*ClassicalStatisticsData::BLOCK_SIZE*_myStride;
-    if (offset+increment >= _myCount*_myStride) {
-        // necessary because in some cases std::advance will segfault
-        // if advanced past the end of the data structure
-        return;
-    }
-    std::advance(dataIter, increment);
-    if (_hasWeights) {
-        std::advance(weightsIter, increment);
-    }
-    if (_hasMask) {
-        std::advance(maskIter, nthreads*ClassicalStatisticsData::BLOCK_SIZE*_maskStride);
-    }
-    offset += increment;
-}
-
-CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_computeStats(
     StatsData<AccumType>& stats, uInt64& ngood, LocationType& location,
     DataIterator dataIter, MaskIterator maskIter,
-    WeightsIterator weightsIter, uInt64 count
+    WeightsIterator weightsIter, uInt64 count,
+    const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk
 ) {
-    if (_hasWeights) {
+    if (chunk.weights) {
         stats.weighted = True;
-        if (_hasMask) {
+        if (chunk.mask) {
             stats.masked = True;
-            if (_hasRanges) {
+            if (chunk.ranges) {
                 _weightedStats(
                     stats, location, dataIter, weightsIter, count,
-                    _myStride, maskIter, _maskStride,
-                    _myRanges, _myIsInclude
+                    chunk.dataStride, maskIter, chunk.mask->second,
+                    chunk.ranges->first, chunk.ranges->second
                 );
             }
             else {
                 _weightedStats(
                     stats, location, dataIter, weightsIter, count,
-                    _myStride, maskIter, _maskStride
+                    chunk.dataStride, maskIter, chunk.mask->second
                 );
             }
         }
-        else if (_hasRanges) {
+        else if (chunk.ranges) {
             _weightedStats(
                 stats, location, dataIter, weightsIter,
-                count, _myStride,_myRanges, _myIsInclude
+                count, chunk.dataStride, chunk.ranges->first,
+                chunk.ranges->second
             );
         }
         else {
             // has weights, but no mask nor ranges
             _weightedStats(
                 stats, location, dataIter, weightsIter,
-                count, _myStride
+                count, chunk.dataStride
             );
         }
     }
-    else if (_hasMask) {
+    else if (chunk.mask) {
         // this data set has no weights, but does have a mask
         stats.masked = True;
-        if (_hasRanges) {
+        if (chunk.ranges) {
             _unweightedStats(
-                stats, ngood, location, dataIter, count, _myStride,
-                maskIter, _maskStride, _myRanges, _myIsInclude
+                stats, ngood, location, dataIter, count, chunk.dataStride,
+                maskIter, chunk.mask->second, chunk.ranges->first,
+                chunk.ranges->second
             );
         }
         else {
             _unweightedStats(
                 stats, ngood, location, dataIter, count,
-                _myStride, maskIter, _maskStride
+                chunk.dataStride, maskIter, chunk.mask->second
             );
         }
     }
-    else if (_hasRanges) {
+    else if (chunk.ranges) {
         // this data set has no weights no mask, but does have a set of ranges
         // associated with it
         _unweightedStats(
             stats, ngood, location, dataIter, count,
-            _myStride, _myRanges, _myIsInclude
+            chunk.dataStride, chunk.ranges->first,
+            chunk.ranges->second
         );
     }
     else {
         // simplest case, this data set has no weights, no mask, nor any ranges associated
         // with it, and its stride is 1. No filtering of the data is necessary.
         _unweightedStats(
-            stats, ngood, location,
-            dataIter, count, _myStride
+            stats, ngood, location, dataIter,
+            count, chunk.dataStride
         );
     }
-    if (! _hasWeights) {
+    if (! chunk.weights) {
         stats.sumweights += ngood;
     }
 }
 
 CASA_STATD
-Bool ClassicalStatistics<CASA_STATP>::_increment(Bool includeIDataset) {
-    if (includeIDataset) {
-        ++_idataset;
-    }
-    StatsDataProvider<CASA_STATP> *dataProvider = this->_getDataProvider();
-    if (dataProvider) {
-        ++(*dataProvider);
-        if (dataProvider->atEnd()) {
-            dataProvider->finalize();
-            return True;
-        }
-    }
-    else {
-        ++_diter;
-        if (_diter == _dend) {
-            return True;
-        }
-        ++_citer;
-        ++_dsiter;
-        ++_dataCount;
-    }
-    return False;
-}
-
-CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_accumNpts(
     uInt64& npts,
-    const DataIterator& /*dataBegin*/, Int64 nr, uInt /*dataStride*/
+    const DataIterator&, Int64 nr, uInt
 ) const {
     npts += nr;
 }
@@ -908,7 +862,7 @@ CASA_STATD
 uInt ClassicalStatistics<CASA_STATP>::_nThreadsMax() const {
     uInt nthr = OMP::nMaxThreads();
     if (nthr > 1) {
-        const StatsDataProvider<CASA_STATP> *dataProvider = this->_getDataProvider();
+        const StatsDataProvider<CASA_STATP> *dataProvider = this->_getDataset().getDataProvider();
         if (dataProvider) {
             uInt n = dataProvider->getNMaxThreads();
             if (n > 0) {
@@ -952,29 +906,31 @@ std::vector<std::vector<uInt64> > ClassicalStatistics<CASA_STATP>::_binCounts(
         }
     }
     std::vector<Bool> allSame(binDesc.size(), True);
+    // the elements in the outer vector are histograms. The elements in the inner
+    // vector are the bins in the corresponding histograms. The Int64 elements
+    // are the number of data points in those bins
     std::vector<std::vector<uInt64> > bins(binDesc.size());
-    iDesc = bDesc;
-    std::vector<std::vector<uInt64> >::iterator bBins = bins.begin();
-    std::vector<std::vector<uInt64> >::iterator iBins = bBins;
+    std::vector<std::vector<uInt64> >::iterator iBins = bins.begin();
     std::vector<std::vector<uInt64> >::iterator eBins = bins.end();
-    while (iBins != eBins) {
+    // initialize all bin counts to 0
+    for (iDesc = bDesc; iBins!=eBins; ++iBins, ++iDesc) {
         *iBins = std::vector<uInt64>(iDesc->nBins, 0);
-        ++iDesc;
-        ++iBins;
     }
+    // same val indicates if all values in a histogram (the vector elements) are the same
     sameVal = std::vector<CountedPtr<AccumType> >(binDesc.size(), NULL);
+    // maxLimit are the maximum limits for each histogram. set them here.
     std::vector<AccumType> maxLimit(binDesc.size());
-    typename std::vector<AccumType>::iterator bMaxLimit = maxLimit.begin();
-    typename std::vector<AccumType>::iterator iMaxLimit = bMaxLimit;
+    typename std::vector<AccumType>::iterator iMaxLimit = maxLimit.begin();
     typename std::vector<AccumType>::iterator eMaxLimit = maxLimit.end();
-    iDesc = bDesc;
-    while(iMaxLimit != eMaxLimit) {
+    for (iDesc=bDesc; iMaxLimit!=eMaxLimit; ++iMaxLimit, ++iDesc) {
         *iMaxLimit = iDesc->minLimit + (AccumType)(iDesc->nBins)*(iDesc->binWidth);
-        ++iMaxLimit;
-        ++iDesc;
     }
-    _initIterators();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
     const uInt nThreadsMax = _nThreadsMax();
+    // The PtrHolders hold references to C arrays of length
+    // ClassicalStatisticsData::CACHE_PADDING*nThreadsMax.
+    // Only every CACHE_PADDING*nth element will be populated
     PtrHolder<std::vector<std::vector<uInt64> > > tBins(
         new std::vector<std::vector<uInt64> >[
             ClassicalStatisticsData::CACHE_PADDING*nThreadsMax
@@ -997,14 +953,14 @@ std::vector<std::vector<uInt64> > ClassicalStatistics<CASA_STATP>::_binCounts(
         tAllSame[idx8] = allSame;
     }
     while (True) {
-        _initLoopVars();
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
         uInt nBlocks, nthreads;
         uInt64 extra;
         PtrHolder<DataIterator> dataIter;
         PtrHolder<MaskIterator> maskIter;
         PtrHolder<WeightsIterator> weightsIter;
         PtrHolder<uInt64> offset;
-        _initThreadVars(
+        ds.initThreadVars(
             nBlocks, extra, nthreads, dataIter,
             maskIter, weightsIter, offset, nThreadsMax
         );
@@ -1013,84 +969,26 @@ std::vector<std::vector<uInt64> > ClassicalStatistics<CASA_STATP>::_binCounts(
 #endif
         for (uInt i=0; i<nBlocks; ++i) {
             uInt idx8 = _threadIdx();
-            uInt64 dataCount = _myCount - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
+            uInt64 dataCount = chunk.count - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
                 ? extra : ClassicalStatisticsData::BLOCK_SIZE;
             _computeBins(
-                tBins[idx8], tSameVal[idx8], tAllSame[idx8], dataIter[idx8],
-                maskIter[idx8], weightsIter[idx8], dataCount, binDesc, maxLimit
+                tBins[idx8], tSameVal[idx8], tAllSame[idx8],
+                dataIter[idx8], maskIter[idx8], weightsIter[idx8],
+                dataCount, binDesc, maxLimit, chunk
             );
-            _incrementThreadIters(
+            ds.incrementThreadIters(
                 dataIter[idx8], maskIter[idx8], weightsIter[idx8],
                 offset[idx8], nthreads
             );
         }
-        if (_increment(False)) {
+        if (ds.increment(False)) {
             break;
         }
     }
-    _mergeResults(
+    StatisticsUtilities<AccumType>::mergeResults(
         bins, sameVal, allSame, tBins, tSameVal, tAllSame, nThreadsMax
     );
     return bins;
-}
-
-CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_mergeResults(
-    std::vector<std::vector<uInt64> >& bins, std::vector<CountedPtr<AccumType> >& sameVal,
-    std::vector<Bool>& allSame, const PtrHolder<std::vector<std::vector<uInt64> > >& tBins,
-    const PtrHolder<std::vector<CountedPtr<AccumType> > >& tSameVal,
-    const PtrHolder<std::vector<Bool> >& tAllSame, uInt nThreadsMax
-) {
-    // merge results from individual threads (tBins, tSameVal, tAllSame)
-    // into single data structures (bins, sameVal, allSame)
-    for (uInt tid=0; tid<nThreadsMax; ++tid) {
-        std::vector<std::vector<uInt64> >::iterator iter;
-        std::vector<std::vector<uInt64> >::iterator end = bins.end();
-        typename std::vector<CountedPtr<AccumType> >::iterator siter;
-        typename std::vector<CountedPtr<AccumType> >::iterator send = sameVal.end();
-        std::vector<Bool>::iterator aiter;
-        uInt idx8 = ClassicalStatisticsData::CACHE_PADDING*tid;
-        std::vector<std::vector<uInt64> >::const_iterator titer = tBins[idx8].begin();
-        for (iter=bins.begin(); iter!=end; ++iter, ++titer) {
-            std::transform(
-                iter->begin(), iter->end(), titer->begin(),
-                iter->begin(), std::plus<Int64>()
-            );
-        }
-        typename std::vector<CountedPtr<AccumType> >::const_iterator viter = tSameVal[idx8].begin();
-        std::vector<Bool>::const_iterator witer = tAllSame[idx8].begin();
-        for (
-            siter=sameVal.begin(), aiter=allSame.begin(); siter!=send;
-            ++siter, ++viter, ++aiter, ++witer
-        ) {
-            if (! *aiter) {
-                // won't have the same values, do nothing
-            }
-            if (*witer && *aiter) {
-                if (
-                    viter->null()
-                    || (! siter->null() && *(*siter) == *(*viter))
-                ) {
-                    // no unflagged values in this chunk or both
-                    // have the all the same values, do nothing
-                }
-                else if (siter->null()) {
-                    siter->reset(new AccumType(*(*viter)));
-                }
-                else {
-                    // both are not null, and they do not have
-                    // the same values
-                    siter->reset();
-                    *aiter = False;
-                }
-            }
-            else {
-                // *aiter = True, *witer = False, all values are not the same
-                siter->reset();
-                *aiter = False;
-            }
-        }
-    }
 }
 
 CASA_STATD
@@ -1099,71 +997,71 @@ void ClassicalStatistics<CASA_STATP>::_computeBins(
     std::vector<Bool>& allSame, DataIterator dataIter, MaskIterator maskIter,
     WeightsIterator weightsIter, uInt64 count,
     const std::vector<typename StatisticsUtilities<AccumType>::BinDesc>& binDesc,
-    const std::vector<AccumType>& maxLimit
+    const std::vector<AccumType>& maxLimit,
+    const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk
 ) {
-    if (_hasWeights) {
-        if (_hasMask) {
-            if (_hasRanges) {
+    if (chunk.weights) {
+        if (chunk.mask) {
+            if (chunk.ranges) {
                 _findBins(
                     bins, sameVal, allSame, dataIter, weightsIter, count,
-                    _myStride, maskIter, _maskStride, _myRanges, _myIsInclude,
-                    binDesc, maxLimit
+                    chunk.dataStride, maskIter, chunk.mask->second, chunk.ranges->first,
+                    chunk.ranges->second, binDesc, maxLimit
                 );
             }
             else {
                 _findBins(
                     bins, sameVal, allSame, dataIter, weightsIter,
-                    count, _myStride, maskIter, _maskStride,
+                    count, chunk.dataStride, maskIter, chunk.mask->second,
                     binDesc, maxLimit
                 );
             }
         }
-        else if (_hasRanges) {
+        else if (chunk.ranges) {
             _findBins(
                 bins, sameVal, allSame, dataIter, weightsIter, count,
-                _myStride, _myRanges, _myIsInclude,
+                chunk.dataStride, chunk.ranges->first, chunk.ranges->second,
                 binDesc, maxLimit
             );
         }
         else {
             // has weights, but no mask nor ranges
             _findBins(
-                bins, sameVal, allSame, dataIter, weightsIter, count, _myStride,
-                binDesc, maxLimit
+                bins, sameVal, allSame, dataIter, weightsIter,
+                count, chunk.dataStride, binDesc, maxLimit
             );
         }
     }
-    else if (_hasMask) {
+    else if (chunk.mask) {
         // this data set has no weights, but does have a mask
-        if (_hasRanges) {
+        if (chunk.ranges) {
             _findBins(
-                bins, sameVal, allSame, dataIter, count, _myStride,
-                maskIter, _maskStride, _myRanges, _myIsInclude,
-                binDesc, maxLimit
+                bins, sameVal, allSame, dataIter, count, chunk.dataStride,
+                maskIter, chunk.mask->second, chunk.ranges->first,
+                chunk.ranges->second, binDesc, maxLimit
             );
         }
         else {
             _findBins(
-                bins, sameVal, allSame, dataIter, count, _myStride, maskIter, _maskStride,
-                binDesc, maxLimit
+                bins, sameVal, allSame, dataIter, count, chunk.dataStride,
+                maskIter, chunk.mask->second, binDesc, maxLimit
             );
         }
     }
-    else if (_hasRanges) {
+    else if (chunk.ranges) {
         // this data set has no weights no mask, but does have a set of ranges
         // associated with it
         _findBins(
-            bins, sameVal, allSame, dataIter, count, _myStride,
-            _myRanges, _myIsInclude,
-            binDesc, maxLimit
+            bins, sameVal, allSame, dataIter, count, chunk.dataStride,
+            chunk.ranges->first, chunk.ranges->second, binDesc, maxLimit
         );
     }
     else {
         // simplest case, this data set has no weights, no mask, nor any ranges associated
         // with it. No filtering of the data is necessary.
         _findBins(
-            bins, sameVal, allSame, dataIter, count, _myStride,
-            binDesc, maxLimit
+            bins, sameVal, allSame, dataIter,
+            count, chunk.dataStride, binDesc, maxLimit
         );
     }
 }
@@ -1172,7 +1070,8 @@ CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_createDataArray(
     std::vector<AccumType>& ary
 ) {
-    _initIterators();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
     const uInt nThreadsMax = _nThreadsMax();
     PtrHolder<std::vector<AccumType> > tAry(
         new std::vector<AccumType>[
@@ -1180,14 +1079,14 @@ void ClassicalStatistics<CASA_STATP>::_createDataArray(
         ], True
     );
     while (True) {
-        _initLoopVars();
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
         uInt nBlocks, nthreads;
         uInt64 extra;
         PtrHolder<DataIterator> dataIter;
         PtrHolder<MaskIterator> maskIter;
         PtrHolder<WeightsIterator> weightsIter;
         PtrHolder<uInt64> offset;
-        _initThreadVars(
+        ds.initThreadVars(
             nBlocks, extra, nthreads, dataIter,
             maskIter, weightsIter, offset, nThreadsMax
         );
@@ -1196,18 +1095,18 @@ void ClassicalStatistics<CASA_STATP>::_createDataArray(
 #endif
         for (uInt i=0; i<nBlocks; ++i) {
             uInt idx8 = _threadIdx();
-            uInt64 dataCount = _myCount - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
+            uInt64 dataCount = chunk.count - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
                 ? extra : ClassicalStatisticsData::BLOCK_SIZE;
             _computeDataArray(
                 tAry[idx8], dataIter[idx8], maskIter[idx8],
-                weightsIter[idx8], dataCount
+                weightsIter[idx8], dataCount, chunk
             );
-            _incrementThreadIters(
+            ds.incrementThreadIters(
                 dataIter[idx8], maskIter[idx8], weightsIter[idx8],
                 offset[idx8], nthreads
             );
         }
-        if (_increment(False)) {
+        if (ds.increment(False)) {
             break;
         }
     }
@@ -1222,63 +1121,66 @@ CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_computeDataArray(
     std::vector<AccumType>& ary, DataIterator dataIter,
     MaskIterator maskIter, WeightsIterator weightsIter,
-    uInt64 dataCount
+    uInt64 dataCount,
+    const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk
 ) {
-    if (_hasWeights) {
-        if (_hasMask) {
-            if (_hasRanges) {
+    if (chunk.weights) {
+        if (chunk.mask) {
+            if (chunk.ranges) {
                 _populateArray(
                     ary, dataIter, weightsIter, dataCount,
-                    _myStride, maskIter, _maskStride, _myRanges, _myIsInclude
+                    chunk.dataStride, maskIter, chunk.mask->second,
+                    chunk.ranges->first, chunk.ranges->second
                 );
             }
             else {
                 _populateArray(
-                    ary, dataIter, weightsIter,
-                    dataCount, _myStride, maskIter, _maskStride
+                    ary, dataIter, weightsIter, dataCount,
+                    chunk.dataStride, maskIter, chunk.mask->second
                 );
             }
         }
-        else if (_hasRanges) {
+        else if (chunk.ranges) {
             _populateArray(
-                ary, dataIter, weightsIter, dataCount,
-                _myStride, _myRanges, _myIsInclude
+                ary, dataIter, weightsIter, dataCount, chunk.dataStride,
+                chunk.ranges->first, chunk.ranges->second
             );
         }
         else {
             // has weights, but no mask nor ranges
             _populateArray(
-                ary, dataIter, weightsIter, dataCount, _myStride
+                ary, dataIter, weightsIter, dataCount, chunk.dataStride
             );
         }
     }
-    else if (_hasMask) {
+    else if (chunk.mask) {
         // this data set has no weights, but does have a mask
-        if (_hasRanges) {
+        if (chunk.ranges) {
             _populateArray(
-                ary, dataIter, dataCount, _myStride,
-                maskIter, _maskStride, _myRanges, _myIsInclude
+                ary, dataIter, dataCount, chunk.dataStride, maskIter,
+                chunk.mask->second, chunk.ranges->first, chunk.ranges->second
             );
         }
         else {
             _populateArray(
-                ary, dataIter, dataCount, _myStride, maskIter, _maskStride
+                ary, dataIter, dataCount, chunk.dataStride,
+                maskIter, chunk.mask->second
             );
         }
     }
-    else if (_hasRanges) {
+    else if (chunk.ranges) {
         // this data set has no weights no mask, but does have a set of ranges
         // associated with it
         _populateArray(
-            ary, dataIter, dataCount, _myStride,
-            _myRanges, _myIsInclude
+            ary, dataIter, dataCount, chunk.dataStride,
+            chunk.ranges->first, chunk.ranges->second
         );
     }
     else {
         // simplest case, this data set has no weights, no mask, nor any ranges associated
         // with it, and its stride is 1. No filtering of the data is necessary.
         _populateArray(
-            ary, dataIter, dataCount, _myStride
+            ary, dataIter, dataCount, chunk.dataStride
         );
     }
 }
@@ -1313,7 +1215,8 @@ void ClassicalStatistics<CASA_STATP>::_createDataArrays(
         prevLimits = *iLimits;
         ++iLimits;
     }
-    _initIterators();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
     const uInt nThreadsMax = _nThreadsMax();
     PtrHolder<std::vector<std::vector<AccumType> > > tArys(
         new std::vector<std::vector<AccumType> >[
@@ -1331,14 +1234,14 @@ void ClassicalStatistics<CASA_STATP>::_createDataArrays(
     }
     uInt64 currentCount = 0;
     while (currentCount < maxCount) {
-        _initLoopVars();
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
         uInt nBlocks, nthreads;
         uInt64 extra;
         PtrHolder<DataIterator> dataIter;
         PtrHolder<MaskIterator> maskIter;
         PtrHolder<WeightsIterator> weightsIter;
         PtrHolder<uInt64> offset;
-        _initThreadVars(
+        ds.initThreadVars(
             nBlocks, extra, nthreads, dataIter,
             maskIter, weightsIter, offset, nThreadsMax
         );
@@ -1351,13 +1254,14 @@ void ClassicalStatistics<CASA_STATP>::_createDataArrays(
 #endif
         for (uInt i=0; i<nBlocks; ++i) {
             uInt idx8 = _threadIdx();
-            uInt64 dataCount = _myCount - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
+            uInt64 dataCount = chunk.count - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
                 ? extra : ClassicalStatisticsData::BLOCK_SIZE;
             _computeDataArrays(
-                tArys[idx8], tCurrentCount[idx8], dataIter[idx8], maskIter[idx8],
-                weightsIter[idx8], dataCount, includeLimits, maxCount
+                tArys[idx8], tCurrentCount[idx8], dataIter[idx8],
+                maskIter[idx8], weightsIter[idx8], dataCount,
+                includeLimits, maxCount, chunk
             );
-            _incrementThreadIters(
+            ds.incrementThreadIters(
                 dataIter[idx8], maskIter[idx8], weightsIter[idx8],
                 offset[idx8], nthreads
             );
@@ -1372,11 +1276,11 @@ void ClassicalStatistics<CASA_STATP>::_createDataArrays(
             uInt idx8 = ClassicalStatisticsData::CACHE_PADDING*tid;
             currentCount += (tCurrentCount[idx8] - prevCount);
         }
-        if (_increment(False)) {
+        if (ds.increment(False)) {
             break;
         }
     }
-    // CAS-10906 This appears to happen extemely rarely (one report in several years).
+    // CAS-10906 This appears to happen extremely rarely (one report in several years).
     // To the best of my determination, it happens when the data iterator type and
     // the AccumType are not the same (eg Float and Double, respectively), because
     // the data are implicitly cast to AccumType. This slight value change at the data type
@@ -1424,29 +1328,30 @@ void ClassicalStatistics<CASA_STATP>::_computeDataArrays(
     DataIterator dataIter, MaskIterator maskIter,
     WeightsIterator weightsIter, uInt64 dataCount,
     const std::vector<std::pair<AccumType, AccumType> >& includeLimits,
-    uInt64 maxCount
+    uInt64 maxCount,
+    const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk
 ) {
-    if (_hasWeights) {
-        if (_hasMask) {
-            if (_hasRanges) {
+    if (chunk.weights) {
+        if (chunk.mask) {
+            if (chunk.ranges) {
                 _populateArrays(
                     arys, currentCount, dataIter, weightsIter, dataCount,
-                    _myStride, maskIter, _maskStride, _myRanges, _myIsInclude,
-                    includeLimits, maxCount
+                    chunk.dataStride, maskIter, chunk.mask->second, chunk.ranges->first,
+                    chunk.ranges->second, includeLimits, maxCount
                 );
             }
             else {
                 _populateArrays(
                     arys, currentCount, dataIter, weightsIter,
-                    dataCount, _myStride, maskIter, _maskStride,
+                    dataCount, chunk.dataStride, maskIter, chunk.mask->second,
                     includeLimits, maxCount
                 );
             }
         }
-        else if (_hasRanges) {
+        else if (chunk.ranges) {
             _populateArrays(
                 arys, currentCount, dataIter, weightsIter, dataCount,
-                _myStride, _myRanges, _myIsInclude,
+                chunk.dataStride, chunk.ranges->first, chunk.ranges->second,
                 includeLimits, maxCount
             );
         }
@@ -1454,32 +1359,32 @@ void ClassicalStatistics<CASA_STATP>::_computeDataArrays(
             // has weights, but no mask nor ranges
             _populateArrays(
                 arys, currentCount, dataIter, weightsIter,
-                dataCount, _myStride, includeLimits, maxCount
+                dataCount, chunk.dataStride, includeLimits, maxCount
             );
         }
     }
-    else if (_hasMask) {
+    else if (chunk.mask) {
         // this data set has no weights, but does have a mask
-        if (_hasRanges) {
+        if (chunk.ranges) {
             _populateArrays(
-                arys, currentCount, dataIter, dataCount, _myStride,
-                maskIter, _maskStride, _myRanges, _myIsInclude,
-                includeLimits, maxCount
+                arys, currentCount, dataIter, dataCount, chunk.dataStride,
+                maskIter, chunk.mask->second, chunk.ranges->first,
+                chunk.ranges->second, includeLimits, maxCount
             );
         }
         else {
             _populateArrays(
-                arys, currentCount, dataIter, dataCount, _myStride,
-                maskIter, _maskStride, includeLimits, maxCount
+                arys, currentCount, dataIter, dataCount, chunk.dataStride,
+                maskIter, chunk.mask->second, includeLimits, maxCount
             );
         }
     }
-    else if (_hasRanges) {
+    else if (chunk.ranges) {
         // this data set has no weights no mask, but does have a set of ranges
         // associated with it
         _populateArrays(
-            arys, currentCount, dataIter, dataCount, _myStride,
-            _myRanges, _myIsInclude, includeLimits, maxCount
+            arys, currentCount, dataIter, dataCount, chunk.dataStride,
+            chunk.ranges->first, chunk.ranges->second, includeLimits, maxCount
         );
     }
     else {
@@ -1487,7 +1392,7 @@ void ClassicalStatistics<CASA_STATP>::_computeDataArrays(
         // with it, and its stride is 1. No filtering of the data is necessary.
         _populateArrays(
             arys, currentCount, dataIter, dataCount,
-            _myStride, includeLimits, maxCount
+            chunk.dataStride, includeLimits, maxCount
         );
     }
 }
@@ -1645,7 +1550,6 @@ std::vector<std::map<uInt64, AccumType> > ClassicalStatistics<CASA_STATP>::_data
         std::vector<std::map<uInt64, AccumType> > ret(binLimits.size());
         typename std::vector<std::map<uInt64, AccumType> >::iterator bRet = ret.begin();
         typename std::vector<std::map<uInt64, AccumType> >::iterator iRet = bRet;
-        // typename std::vector<std::map<uInt64, AccumType> >::iterator eRet = ret.end();
         iArrays = bArrays;
         while(iIdxSet != eIdxSet) {
             std::set<uInt64>::const_iterator initer = iIdxSet->begin();
@@ -1684,7 +1588,7 @@ std::vector<std::map<uInt64, AccumType> > ClassicalStatistics<CASA_STATP>::_data
             std::vector<typename StatisticsUtilities<AccumType>::BinDesc> binDesc;
             while (iLimits != eLimits) {
                 typename StatisticsUtilities<AccumType>::BinDesc histogram;
-                _makeBins(
+                StatisticsUtilities<AccumType>::makeBins(
                     histogram, iLimits->first, iLimits->second,
                     nBins, False
                 );
@@ -1711,22 +1615,11 @@ std::vector<std::map<uInt64, AccumType> > ClassicalStatistics<CASA_STATP>::_data
 }
 
 CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_convertToAbsDevMedArray(
-    std::vector<AccumType>& myArray, AccumType median
-) {
-    typename std::vector<AccumType>::iterator iter = myArray.begin();
-    typename std::vector<AccumType>::iterator end = myArray.end();
-    while (iter != end) {
-        *iter = abs(*iter - median);
-        ++iter;
-    }
-}
-
-CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_doMinMax(
     AccumType& datamin, AccumType& datamax
 ) {
-    _initIterators();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
     const uInt nThreadsMax = _nThreadsMax();
     PtrHolder<CountedPtr<AccumType> > tmin(
         new CountedPtr<AccumType>[
@@ -1739,14 +1632,14 @@ void ClassicalStatistics<CASA_STATP>::_doMinMax(
         ], True
     );
     while (True) {
-        _initLoopVars();
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
         uInt nBlocks, nthreads;
         uInt64 extra;
         PtrHolder<DataIterator> dataIter;
         PtrHolder<MaskIterator> maskIter;
         PtrHolder<WeightsIterator> weightsIter;
         PtrHolder<uInt64> offset;
-        _initThreadVars(
+        ds.initThreadVars(
             nBlocks, extra, nthreads, dataIter,
             maskIter, weightsIter, offset, nThreadsMax
         );
@@ -1755,18 +1648,18 @@ void ClassicalStatistics<CASA_STATP>::_doMinMax(
 #endif
         for (uInt i=0; i<nBlocks; ++i) {
             uInt idx8 = _threadIdx();
-            uInt64 dataCount = _myCount - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
+            uInt64 dataCount = chunk.count - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
                 ? extra : ClassicalStatisticsData::BLOCK_SIZE;
             _computeMinMax(
                 tmax[idx8], tmin[idx8], dataIter[idx8], maskIter[idx8],
-                weightsIter[idx8], dataCount
+                weightsIter[idx8], dataCount, chunk
             );
-            _incrementThreadIters(
+            ds.incrementThreadIters(
                 dataIter[idx8], maskIter[idx8], weightsIter[idx8],
                 offset[idx8], nthreads
             );
         }
-        if (_increment(False)) {
+        if (ds.increment(False)) {
             break;
         }
     }
@@ -1774,19 +1667,19 @@ void ClassicalStatistics<CASA_STATP>::_doMinMax(
     CountedPtr<AccumType> mymin;
     for (uInt i=0; i<nThreadsMax; ++i) {
         uInt idx8 = i * ClassicalStatisticsData::CACHE_PADDING;
-        if (! tmin[idx8].null()) {
-            if (mymin.null() || *tmin[idx8] < *mymin) {
+        if (tmin[idx8]) {
+            if (! mymin || *tmin[idx8] < *mymin) {
                 mymin = tmin[idx8];
             }
         }
-        if (! tmax[idx8].null()) {
-            if (mymax.null() || *tmax[idx8] > *mymax) {
+        if (tmax[idx8]) {
+            if (! mymax || *tmax[idx8] > *mymax) {
                 mymax = tmax[idx8];
             }
         }
     }
     ThrowIf (
-        mymax.null() || mymin.null(),
+        ! mymax || ! mymin,
         "No valid data found"
     );
     datamin = *mymin;
@@ -1797,136 +1690,188 @@ CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_computeMinMax(
     CountedPtr<AccumType>& mymax, CountedPtr<AccumType>& mymin,
     DataIterator dataIter, MaskIterator maskIter,
-    WeightsIterator weightsIter, uInt64 dataCount
+    WeightsIterator weightsIter, uInt64 dataCount,
+    const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk
 ) {
-    if (_hasWeights) {
-        if (_hasMask) {
-            if (_hasRanges) {
+    if (chunk.weights) {
+        if (chunk.mask) {
+            if (chunk.ranges) {
                 _minMax(
-                    mymin, mymax, dataIter, weightsIter, dataCount, _myStride,
-                    maskIter, _maskStride, _myRanges, _myIsInclude
+                    mymin, mymax, dataIter, weightsIter, dataCount,
+                    chunk.dataStride, maskIter, chunk.mask->second,
+                    chunk.ranges->first, chunk.ranges->second
                 );
             }
             else {
                 _minMax(
                     mymin, mymax, dataIter, weightsIter, dataCount,
-                    _myStride, maskIter, _maskStride
+                    chunk.dataStride, maskIter, chunk.mask->second
                 );
             }
         }
-        else if (_hasRanges) {
+        else if (chunk.ranges) {
             _minMax(
                 mymin, mymax, dataIter, weightsIter, dataCount,
-                _myStride, _myRanges, _myIsInclude
+                chunk.dataStride, chunk.ranges->first, chunk.ranges->second
             );
         }
         else {
             // has weights, but no mask nor ranges
             _minMax(
-                mymin, mymax, dataIter, weightsIter, dataCount, _myStride
+                mymin, mymax, dataIter, weightsIter,
+                dataCount, chunk.dataStride
             );
         }
     }
-    else if (_hasMask) {
+    else if (chunk.mask) {
         // this data set has no weights, but does have a mask
-        if (_hasRanges) {
+        if (chunk.ranges) {
             _minMax(
-                mymin, mymax, dataIter, dataCount, _myStride, maskIter,
-                _maskStride, _myRanges, _myIsInclude
+                mymin, mymax, dataIter, dataCount,
+                chunk.dataStride, maskIter, chunk.mask->second,
+                chunk.ranges->first, chunk.ranges->second
             );
         }
         else {
             _minMax(
                 mymin, mymax, dataIter, dataCount,
-                _myStride, maskIter, _maskStride
+                chunk.dataStride, maskIter, chunk.mask->second
             );
         }
     }
-    else if (_hasRanges) {
+    else if (chunk.ranges) {
         // this data set has no weights no mask, but does have a set of ranges
         // associated with it
         _minMax(
-            mymin, mymax, dataIter, dataCount,
-            _myStride, _myRanges, _myIsInclude
+            mymin, mymax, dataIter, dataCount, chunk.dataStride,
+            chunk.ranges->first, chunk.ranges->second
         );
     }
     else {
         // simplest case, this data set has no weights, no mask, nor any ranges associated
         // with it. No filtering of the data is necessary.
-        _minMax(mymin, mymax, dataIter, dataCount, _myStride);
+        _minMax(mymin, mymax, dataIter, dataCount, chunk.dataStride);
     }
 }
 
 CASA_STATD
 Int64 ClassicalStatistics<CASA_STATP>::_doNpts() {
-    _initIterators();
-    uInt64 npts = 0;
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
+    const uInt nThreadsMax = _nThreadsMax();
+    PtrHolder<uInt64> npts(
+        new uInt64[
+            ClassicalStatisticsData::CACHE_PADDING*nThreadsMax
+        ], True
+    );
+    for (uInt tid=0; tid<nThreadsMax; ++tid) {
+        uInt idx8 = ClassicalStatisticsData::CACHE_PADDING*tid;
+        npts[idx8] = 0;
+    }
     while (True) {
-        _initLoopVars();
-        if (_hasWeights) {
-            if (_hasMask) {
-                if (_hasRanges) {
-                    _accumNpts(
-                        npts, _myData, _myWeights, _myCount, _myStride,
-                        _myMask, _maskStride, _myRanges, _myIsInclude
-                    );
-                }
-                else {
-                    _accumNpts(
-                        npts, _myData, _myWeights, _myCount,
-                        _myStride, _myMask, _maskStride
-                    );
-                }
-            }
-            else if (_hasRanges) {
-                _accumNpts(
-                    npts, _myData, _myWeights, _myCount,
-                    _myStride, _myRanges, _myIsInclude
-                );
-            }
-            else {
-                // has weights, but no mask nor ranges
-                _accumNpts(
-                    npts, _myData, _myWeights, _myCount, _myStride
-                );
-            }
-        }
-        else if (_hasMask) {
-            // this data set has no weights, but does have a mask
-            if (_hasRanges) {
-                _accumNpts(
-                    npts, _myData, _myCount, _myStride, _myMask,
-                    _maskStride, _myRanges, _myIsInclude
-                );
-            }
-            else {
-                _accumNpts(
-                    npts, _myData, _myCount,
-                    _myStride, _myMask, _maskStride
-                );
-            }
-        }
-        else if (_hasRanges) {
-            // this data set has no weights no mask, but does have a set of ranges
-            // associated with it
-            _accumNpts(
-                npts, _myData, _myCount,
-                _myStride, _myRanges, _myIsInclude
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
+        uInt nBlocks, nthreads;
+        uInt64 extra;
+        PtrHolder<DataIterator> dataIter;
+        PtrHolder<MaskIterator> maskIter;
+        PtrHolder<WeightsIterator> weightsIter;
+        PtrHolder<uInt64> offset;
+        ds.initThreadVars(
+            nBlocks, extra, nthreads, dataIter,
+            maskIter, weightsIter, offset, nThreadsMax
+        );
+#ifdef _OPENMP
+#pragma omp parallel for num_threads(nthreads)
+#endif
+        for (uInt i=0; i<nBlocks; ++i) {
+            uInt idx8 = _threadIdx();
+            uInt64 dataCount = chunk.count - offset[idx8] < ClassicalStatisticsData::BLOCK_SIZE
+                ? extra : ClassicalStatisticsData::BLOCK_SIZE;
+            _computeNpts(
+                npts[idx8], dataIter[idx8], maskIter[idx8],
+                weightsIter[idx8], dataCount, chunk
+            );
+            ds.incrementThreadIters(
+                dataIter[idx8], maskIter[idx8], weightsIter[idx8],
+                offset[idx8], nthreads
             );
         }
-        else {
-            // simplest case, this data set has no weights, no mask, nor any ranges associated
-            // with it.
-            _accumNpts(
-                npts, _myData, _myCount, _myStride
-            );
-        }
-        if (_increment(False)) {
+        if (ds.increment(False)) {
             break;
         }
     }
-    ThrowIf (npts == 0, "No valid data found");
-    return npts;
+    uInt myNpts = 0;
+    for (uInt i=0; i<nThreadsMax; ++i) {
+        uInt idx8 = i * ClassicalStatisticsData::CACHE_PADDING;
+        myNpts += npts[idx8];
+    }
+    ThrowIf (myNpts == 0, "No valid data found");
+    return myNpts;
+}
+
+CASA_STATD
+void ClassicalStatistics<CASA_STATP>::_computeNpts(
+    uInt64& npts, DataIterator dataIter, MaskIterator maskIter,
+    WeightsIterator weightsIter, uInt64 dataCount,
+    const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk
+) {
+    if (chunk.weights) {
+        if (chunk.mask) {
+            if (chunk.ranges) {
+                _accumNpts(
+                    npts, dataIter, weightsIter, dataCount,
+                    chunk.dataStride, maskIter, chunk.mask->second,
+                    chunk.ranges->first, chunk.ranges->second
+                );
+            }
+            else {
+                _accumNpts(
+                    npts, dataIter, weightsIter, dataCount,
+                    chunk.dataStride, maskIter, chunk.mask->second
+                );
+            }
+        }
+        else if (chunk.ranges) {
+            _accumNpts(
+                npts, dataIter, weightsIter, dataCount, chunk.dataStride,
+                chunk.ranges->first, chunk.ranges->second
+            );
+        }
+        else {
+            // has weights, but no mask nor ranges
+            _accumNpts(
+                npts, dataIter, weightsIter, dataCount, chunk.dataStride
+            );
+        }
+    }
+    else if (chunk.mask) {
+        // this data set has no weights, but does have a mask
+        if (chunk.ranges) {
+            _accumNpts(
+                npts, dataIter, dataCount, chunk.dataStride, maskIter,
+                chunk.mask->second, chunk.ranges->first, chunk.ranges->second
+            );
+        }
+        else {
+            _accumNpts(
+                npts, dataIter, dataCount, chunk.dataStride,
+                maskIter, chunk.mask->second
+            );
+        }
+    }
+    else if (chunk.ranges) {
+        // this data set has no weights no mask, but does have a set of ranges
+        // associated with it
+        _accumNpts(
+            npts, dataIter, dataCount, chunk.dataStride,
+            chunk.ranges->first, chunk.ranges->second
+        );
+    }
+    else {
+        // simplest case, this data set has no weights, no mask, nor any ranges associated
+        // with it.
+        _accumNpts(npts, dataIter, dataCount, chunk.dataStride);
+    }
 }
 
 // Tried making this into an inline method, but performance decreased by 20 - 25% when
@@ -2303,214 +2248,89 @@ std::map<uInt64, AccumType> ClassicalStatistics<CASA_STATP>::_indicesToValues(
 }
 
 CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_initIterators() {
-    ThrowIf(! _hasData, "No data sets have been added");
-    if (this->_getDataProvider()) {
-        this->_getDataProvider()->reset();
-    }
-    else {
-        _dataCount = 0;
-        const std::vector<DataIterator>& data = this->_getData();
-        _diter = data.begin();
-        _dend = data.end();
-        const std::vector<uInt>& dataStrides = this->_getDataStrides();
-        _dsiter = dataStrides.begin();
-        const std::vector<Int64>& counts = this->_getCounts();
-        _citer = counts.begin();
-        _masks = this->_getMasks();
-        _weights = this->_getWeights();
-        _ranges = this->_getRanges();
-        _isIncludeRanges = this->_getIsIncludeRanges();
-    }
-    _hasRanges = False;
-    _myRanges.clear();
-    _myIsInclude = False;
-    _hasMask = False;
-    _hasWeights = False;
-}
-
-CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_initLoopVars() {
-    StatsDataProvider<CASA_STATP> *dataProvider
-        = this->_getDataProvider();
-    if (dataProvider) {
-        _myData = dataProvider->getData();
-        _myCount = dataProvider->getCount();
-        _myStride = dataProvider->getStride();
-        _hasRanges = dataProvider->hasRanges();
-        if (_hasRanges) {
-            _myRanges = dataProvider->getRanges();
-            _myIsInclude = dataProvider->isInclude();
-        }
-        _hasMask = dataProvider->hasMask();
-        if (_hasMask) {
-            _myMask = dataProvider->getMask();
-            _maskStride = dataProvider->getMaskStride();
-        }
-        _hasWeights = dataProvider->hasWeights();
-        if (_hasWeights) {
-            _myWeights = dataProvider->getWeights();
-        }
-    }
-    else {
-        _myData = *_diter;
-        _myCount = *_citer;
-        _myStride = *_dsiter;
-        typename std::map<uInt, DataRanges>::const_iterator rangeI = _ranges.find(_dataCount);
-        _hasRanges = rangeI != _ranges.end();
-        if (_hasRanges) {
-            _myRanges = rangeI->second;
-            _myIsInclude = _isIncludeRanges.find(_dataCount)->second;
-        }
-        typename std::map<uInt, MaskIterator>::const_iterator maskI = _masks.find(_dataCount);
-        _hasMask = maskI != _masks.end();
-        if (_hasMask) {
-            _myMask = maskI->second;
-            _maskStride = this->_getMaskStrides().find(_dataCount)->second;
-        }
-        _hasWeights = _weights.find(_dataCount) != _weights.end();
-        if (_hasWeights) {
-            _myWeights = _weights.find(_dataCount)->second;
-        }
-    }
-}
-
-CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_initThreadVars(
-    uInt& nBlocks, uInt64& extra, uInt& nthreads, PtrHolder<DataIterator>& dataIter,
-    PtrHolder<MaskIterator>& maskIter, PtrHolder<WeightsIterator>& weightsIter,
-    PtrHolder<uInt64>& offset, uInt nThreadsMax
-) const {
-    uInt n = ClassicalStatisticsData::CACHE_PADDING*nThreadsMax;
-    dataIter.set(new DataIterator[n], True);
-    maskIter.set(new MaskIterator[n], True);
-    weightsIter.set(new WeightsIterator[n], True);
-    offset.set(new uInt64[n], True);
-    nBlocks = _myCount/ClassicalStatisticsData::BLOCK_SIZE;
-    extra = _myCount % ClassicalStatisticsData::BLOCK_SIZE;
-    if (extra > 0) {
-        ++nBlocks;
-    }
-    nthreads = min(nThreadsMax, nBlocks);
-    for (uInt tid=0; tid<nthreads; ++tid) {
-        // advance the per-thread iterators to their correct starting
-        // locations
-        uInt idx8 = ClassicalStatisticsData::CACHE_PADDING*tid;
-        dataIter[idx8] = _myData;
-        offset[idx8] = tid*ClassicalStatisticsData::BLOCK_SIZE*_myStride;
-        std::advance(dataIter[idx8], offset[idx8]);
-        if (_hasWeights) {
-            weightsIter[idx8] = _myWeights;
-            std::advance(weightsIter[idx8], offset[idx8]);
-        }
-        if (_hasMask) {
-            maskIter[idx8] = _myMask;
-            std::advance(maskIter[idx8], tid*ClassicalStatisticsData::BLOCK_SIZE*_maskStride);
-        }
-    }
-}
-
-CASA_STATD
 Bool ClassicalStatistics<CASA_STATP>::_isNptsSmallerThan(
     std::vector<AccumType>& unsortedAry, uInt maxArraySize
 ) {
-    _initIterators();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    ds.initIterators();
     Bool limitReached = False;
     while (True) {
-        _initLoopVars();
-        if (_hasWeights) {
-            if (_hasMask) {
-                if (_hasRanges) {
+        const typename StatisticsDataset<CASA_STATP>::ChunkData& chunk = ds.initLoopVars();
+        if (chunk.weights) {
+            if (chunk.mask) {
+                if (chunk.ranges) {
                     limitReached = _populateTestArray(
-                        unsortedAry, _myData, _myWeights, _myCount,
-                        _myStride, _myMask, _maskStride, _myRanges, _myIsInclude,
+                        unsortedAry, chunk.data, *chunk.weights, chunk.count,
+                        chunk.dataStride, chunk.mask->first, chunk.mask->second,
+                        chunk.ranges->first, chunk.ranges->second,
                         maxArraySize
                     );
                 }
                 else {
                     limitReached = _populateTestArray(
-                        unsortedAry, _myData, _myWeights,
-                        _myCount, _myStride, _myMask, _maskStride,
-                        maxArraySize
+                        unsortedAry, chunk.data, *chunk.weights,
+                        chunk.count, chunk.dataStride, chunk.mask->first,
+                        chunk.mask->second, maxArraySize
                     );
                 }
             }
-            else if (_hasRanges) {
+            else if (chunk.ranges) {
                 limitReached = _populateTestArray(
-                    unsortedAry, _myData, _myWeights, _myCount,
-                    _myStride, _myRanges, _myIsInclude,
+                    unsortedAry, chunk.data, *chunk.weights, chunk.count,
+                    chunk.dataStride, chunk.ranges->first, chunk.ranges->second,
                     maxArraySize
                 );
             }
             else {
                 // has weights, but no mask nor ranges
                 limitReached = _populateTestArray(
-                    unsortedAry, _myData, _myWeights,
-                    _myCount, _myStride, maxArraySize
+                    unsortedAry, chunk.data, *chunk.weights,
+                    chunk.count, chunk.dataStride, maxArraySize
                 );
             }
         }
-        else if (_hasMask) {
+        else if (chunk.mask) {
             // this data set has no weights, but does have a mask
-            if (_hasRanges) {
+            if (chunk.ranges) {
                 limitReached = _populateTestArray(
-                    unsortedAry, _myData, _myCount, _myStride,
-                    _myMask, _maskStride, _myRanges, _myIsInclude,
-                    maxArraySize
+                    unsortedAry, chunk.data, chunk.count, chunk.dataStride,
+                    chunk.mask->first, chunk.mask->second, chunk.ranges->first,
+                    chunk.ranges->second, maxArraySize
                 );
             }
             else {
                 limitReached = _populateTestArray(
-                    unsortedAry, _myData, _myCount, _myStride, _myMask,
-                    _maskStride, maxArraySize
+                    unsortedAry, chunk.data, chunk.count, chunk.dataStride,
+                    chunk.mask->first, chunk.mask->second, maxArraySize
                 );
             }
         }
-        else if (_hasRanges) {
+        else if (chunk.ranges) {
             // this data set has no weights no mask, but does have a set of ranges
             // associated with it
             limitReached = _populateTestArray(
-                unsortedAry, _myData, _myCount, _myStride,
-                _myRanges, _myIsInclude, maxArraySize
+                unsortedAry, chunk.data, chunk.count, chunk.dataStride,
+                chunk.ranges->first, chunk.ranges->second, maxArraySize
             );
         }
         else {
             // simplest case, this data set has no weights, no mask, nor any ranges associated
             // with it, and its stride is 1. No filtering of the data is necessary.
             limitReached = _populateTestArray(
-                unsortedAry, _myData, _myCount, _myStride, maxArraySize
+                unsortedAry, chunk.data, chunk.count,
+                chunk.dataStride, maxArraySize
             );
         }
         if (limitReached) {
             unsortedAry.clear();
             return False;
         }
-        if (_increment(False)) {
+        if (ds.increment(False)) {
             break;
         }
     }
     _getStatsData().npts = unsortedAry.size();
     return True;
-}
-
-CASA_STATD
-void ClassicalStatistics<CASA_STATP>::_makeBins(
-    typename StatisticsUtilities<AccumType>::BinDesc& bins, AccumType minData, AccumType maxData, uInt maxBins, Bool allowPad
-) {
-
-    bins.nBins = maxBins;
-    bins.minLimit = minData;
-    AccumType maxLimit = maxData;
-    if (allowPad) {
-        AccumType pad = (maxData - minData)/1e3;
-        if (pad == (AccumType)0) {
-            // try to handle Int like AccumTypes
-            pad = AccumType(1);
-        }
-        bins.minLimit -= pad;
-        maxLimit += pad;
-    }
-    bins.binWidth = (maxLimit - bins.minLimit)/(AccumType)bins.nBins;
 }
 
 #define _minMaxCode \
@@ -2905,7 +2725,6 @@ void ClassicalStatistics<CASA_STATP>::_populateArray(
             ++iArys; \
         } \
     }
-
 
 CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_populateArrays(
@@ -3332,8 +3151,8 @@ CASA_STATD
 void ClassicalStatistics<CASA_STATP>::_updateDataProviderMaxMin(
     const StatsData<AccumType>& threadStats
 ) {
-    StatsDataProvider<CASA_STATP> *dataProvider
-        = this->_getDataProvider();
+    StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+    StatsDataProvider<CASA_STATP> *dataProvider = ds.getDataProvider();
     if (! dataProvider) {
         return;
     }
@@ -3343,9 +3162,10 @@ void ClassicalStatistics<CASA_STATP>::_updateDataProviderMaxMin(
     // requires that.
     StatsData<AccumType>& stats = _getStatsData();
     Bool same = &threadStats == &stats;
+    const Int64 idataset = ds.iDataset();
     if (
-        _idataset == threadStats.maxpos.first 
-        && (stats.max.null() || *threadStats.max > *stats.max)
+        idataset == threadStats.maxpos.first
+        && (! stats.max || *threadStats.max > *stats.max)
     ) {
         if (! same) {
             // make certain to make a copy, do not assign
@@ -3356,8 +3176,8 @@ void ClassicalStatistics<CASA_STATP>::_updateDataProviderMaxMin(
         dataProvider->updateMaxPos(stats.maxpos);
     }
     if (
-        _idataset == threadStats.minpos.first 
-        && (stats.min.null() || (*threadStats.min) < (*stats.min))
+        idataset == threadStats.minpos.first
+        && (! stats.min || (*threadStats.min) < (*stats.min))
     ) {
         if (! same) {
             // make certain to make a copy of the value, do not assign
@@ -3483,7 +3303,9 @@ Bool ClassicalStatistics<CASA_STATP>::_valuesFromSortedArray(
         // make a copy
         std::vector<AccumType> pSorted = this->_getSortedArray();
         myArray = pSorted;
-        _convertToAbsDevMedArray(myArray, *_getStatsData().median);
+        StatisticsUtilities<AccumType>::convertToAbsDevMedArray(
+            myArray, *_getStatsData().median
+        );
     }
     if (! _doMedAbsDevMed) {
         myArray = this->_getSortedArray();
@@ -3508,9 +3330,10 @@ Bool ClassicalStatistics<CASA_STATP>::_valuesFromSortedArray(
         }
         else {
             // we have to calculate the number of good points
-            if (! this->_getDataProvider()) {
+            const StatisticsDataset<CASA_STATP>& ds = this->_getDataset();
+            if (! ds.getDataProvider()) {
                 // we first get an upper limit by adding up the counts
-                const std::vector<Int64>& counts = this->_getCounts();
+                const std::vector<Int64>& counts = ds.getCounts();
                 uInt64 nr = accumulate(counts.begin(), counts.end(), 0);
                 if (nr <= maxArraySize) {
                     // data can be sorted in memory
@@ -3527,7 +3350,7 @@ Bool ClassicalStatistics<CASA_STATP>::_valuesFromSortedArray(
             }
         }
     }
-    values = StatisticsAlgorithm<CASA_STATP>::_valuesFromArray(
+    values = StatisticsUtilities<AccumType>::indicesToValues(
         myArray, indices
     );
     if (! _doMedAbsDevMed) {
