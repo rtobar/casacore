@@ -60,10 +60,17 @@
 
 namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
+#ifdef HAVE_MPI
+static MPI_Comm globalMpiComm;
+#endif
+
 // The constructor of the derived class should call unmarkForDelete
 // when the construction ended succesfully.
 BaseTable::BaseTable (const String& name, int option, uInt nrrow)
 {
+#ifdef HAVE_MPI
+    itsMpiComm = globalMpiComm;
+#endif
     BaseTableCommon(name, option, nrrow);
 }
 
@@ -71,6 +78,7 @@ BaseTable::BaseTable (const String& name, int option, uInt nrrow)
 BaseTable::BaseTable (MPI_Comm mpiComm, const String& name, int option, uInt nrrow)
     :itsMpiComm  (mpiComm)
 {
+    globalMpiComm = mpiComm;
     BaseTableCommon(name, option, nrrow);
 }
 #endif
