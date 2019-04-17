@@ -61,7 +61,31 @@
 namespace casacore { //# NAMESPACE CASACORE - BEGIN
 
 #ifdef HAVE_MPI
-static MPI_Comm globalMpiComm;
+class Global_Communicator {
+public:
+	void set_if_not_set(MPI_Comm communicator)
+	{
+		std::lock_guard<std::mutex> guard(m_mutex);
+		if (!m_is_set) {
+			m_communicator = communicator;
+			m_is_set = true;
+		}
+	}
+
+	void get_if_set(MPI_Comm &holder)
+	{
+		std::lock_guard<std::mutex> guard(m_mutex);
+		if (m_is_set) {
+			holder = m_communicator;
+		}
+	}
+private:
+	MPI_Comm m_communicator;
+	bool m_is_set = false;
+	std::mutex m_mutex;
+};
+
+static Global_Communicator globalMpiComm;
 #endif
 
 // The constructor of the derived class should call unmarkForDelete
@@ -69,7 +93,7 @@ static MPI_Comm globalMpiComm;
 BaseTable::BaseTable (const String& name, int option, uInt nrrow)
 {
 #ifdef HAVE_MPI
-    itsMpiComm = globalMpiComm;
+    globalMpiComm.get_if_set(itsMpiComm);
 #endif
     BaseTableCommon(name, option, nrrow);
 }
@@ -78,7 +102,7 @@ BaseTable::BaseTable (const String& name, int option, uInt nrrow)
 BaseTable::BaseTable (MPI_Comm mpiComm, const String& name, int option, uInt nrrow)
     :itsMpiComm  (mpiComm)
 {
-    globalMpiComm = mpiComm;
+    globalMpiComm.set_if_not_set(itsMpiComm);
     BaseTableCommon(name, option, nrrow);
 }
 #endif
