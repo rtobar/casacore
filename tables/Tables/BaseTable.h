@@ -549,6 +549,11 @@ protected:
     // Read the TableInfo object.
     void getTableInfo();
 
+#ifdef HAVE_MPI
+    MPI_Comm &getMPIComm()
+    { return itsMpiComm; }
+#endif // HAVE_MPI
+
 private:
     // Copy constructor is forbidden, because copying a table requires
     // some more knowledge (like table name of result).
