@@ -298,6 +298,9 @@ PlainTable::~PlainTable()
 
 void PlainTable::closeObject()
 {
+#ifdef HAVE_MPI
+    MPI_Allreduce(&nrrow_p, &nrrow_p, 1, MPI_UNSIGNED, MPI_MAX, getMPIComm());
+#endif // HAVE_MPI
     //# When needed, write and sync the table files if not marked for delete
     if (!isMarkedForDelete()) {
 	if (openedForWrite()  &&  !shouldNotWrite()) {
@@ -542,6 +545,15 @@ Bool PlainTable::putFile (Bool always)
     TableTrace::traceFile (itsTraceId, "flush");
     Bool writeTab = always || tableChanged_p;
     Bool written = writeTab;
+
+#ifdef HAVE_MPI
+    int rank;
+    MPI_Comm_rank(getMPIComm(), &rank);
+    if (rank != 0) {
+        return true;
+    }
+#endif // HAVE_MPI
+
     {  // use scope to ensure AipsIO is closed (thus flushed) before lockfile
       AipsIO ios;
       TableAttr attr(tableName());
