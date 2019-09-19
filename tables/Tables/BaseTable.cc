@@ -64,13 +64,11 @@ namespace casacore { //# NAMESPACE CASACORE - BEGIN
 #ifdef HAVE_MPI
 class Global_Communicator {
 public:
-	void set_if_not_set(MPI_Comm communicator)
+	void set(MPI_Comm communicator)
 	{
 		std::lock_guard<std::mutex> guard(m_mutex);
-		if (!m_is_set) {
-			m_communicator = communicator;
-			m_is_set = true;
-		}
+		m_communicator = communicator;
+		m_is_set = true;
 	}
 
 	void get_if_set(MPI_Comm &holder)
@@ -103,7 +101,7 @@ BaseTable::BaseTable (const String& name, int option, rownr_t nrrow)
 BaseTable::BaseTable (MPI_Comm mpiComm, const String& name, int option, rownr_t nrrow)
     :itsMpiComm  (mpiComm)
 {
-    globalMpiComm.set_if_not_set(itsMpiComm);
+    globalMpiComm.set(itsMpiComm);
     BaseTableCommon(name, option, nrrow);
 }
 #endif
