@@ -254,7 +254,9 @@ DESTINATION include/casacore/lattices
 )
 
 # The tests
-add_subdirectory (Lattices/test ${EXCL_ALL})
-add_subdirectory (LatticeMath/test ${EXCL_ALL})
-add_subdirectory (LEL/test ${EXCL_ALL})
-add_subdirectory (LRegions/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (Lattices/test)
+  add_subdirectory (LatticeMath/test)
+  add_subdirectory (LEL/test)
+  add_subdirectory (LRegions/test)
+endif()

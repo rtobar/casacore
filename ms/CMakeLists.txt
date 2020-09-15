@@ -316,6 +316,8 @@ MSOper.h
 DESTINATION include/casacore/ms
 )
 
-add_subdirectory (MeasurementSets/test ${EXCL_ALL})
-add_subdirectory (MSSel/test ${EXCL_ALL})
-add_subdirectory (MSOper/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (MeasurementSets/test)
+  add_subdirectory (MSSel/test)
+  add_subdirectory (MSOper/test)
+endif()

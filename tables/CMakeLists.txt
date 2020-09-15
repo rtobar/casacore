@@ -458,7 +458,9 @@ TaQL.h
 DESTINATION include/casacore/tables
 )
 
-add_subdirectory (Tables/test ${EXCL_ALL})
-add_subdirectory (DataMan/test ${EXCL_ALL})
-add_subdirectory (TaQL/test ${EXCL_ALL})
-add_subdirectory (LogTables/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (Tables/test)
+  add_subdirectory (DataMan/test)
+  add_subdirectory (TaQL/test)
+  add_subdirectory (LogTables/test)
+endif()

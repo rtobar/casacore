@@ -161,5 +161,7 @@ Images.h
 DESTINATION include/casacore/images
 )
 
-add_subdirectory (Images/test ${EXCL_ALL})
-add_subdirectory (Regions/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (Images/test)
+  add_subdirectory (Regions/test)
+endif()

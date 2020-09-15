@@ -63,4 +63,6 @@ MSFits.h
 DESTINATION include/casacore/msfits
 )
 
-add_subdirectory (MSFits/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (MSFits/test)
+endif()

@@ -695,8 +695,10 @@ ${PROJECT_BINARY_DIR}/casacore/casa/version.h
 DESTINATION include/casacore/casa
 )
 
-add_subdirectory (test ${EXCL_ALL})
-foreach (casa_module Arrays BasicMath BasicSL Containers
-     Exceptions HDF5 Inputs IO Json Logging OS Quanta System Utilities)
-  add_subdirectory (${casa_module}/test ${EXCL_ALL})
-endforeach (casa_module)
+if (BUILD_TESTING)
+  add_subdirectory (test)
+  foreach (casa_module Arrays BasicMath BasicSL Containers
+       Exceptions HDF5 Inputs IO Json Logging OS Quanta System Utilities)
+    add_subdirectory (${casa_module}/test)
+  endforeach (casa_module)
+endif()

@@ -57,4 +57,6 @@ MeasUDF.h
 DESTINATION include/casacore/meas
 )
 
-add_subdirectory (MeasUDF/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (MeasUDF/test)
+endif()

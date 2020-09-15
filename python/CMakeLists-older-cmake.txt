@@ -114,4 +114,6 @@ Converters.h
 DESTINATION include/casacore/python
 )
 
-add_subdirectory (Converters/test ${EXCL_ALL})
+if (BUILD_TESTING)
+  add_subdirectory (Converters/test)
+endif()

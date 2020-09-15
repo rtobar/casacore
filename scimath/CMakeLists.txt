@@ -346,8 +346,9 @@ Mathematics.h
 DESTINATION include/casacore/scimath
 )
 
-add_subdirectory (Fitting/test ${EXCL_ALL})
-add_subdirectory (Functionals/test ${EXCL_ALL})
-add_subdirectory (Mathematics/test ${EXCL_ALL})
-add_subdirectory (StatsFramework/test ${EXCL_ALL})
-
+if (BUILD_TESTING)
+  add_subdirectory (Fitting/test)
+  add_subdirectory (Functionals/test)
+  add_subdirectory (Mathematics/test)
+  add_subdirectory (StatsFramework/test)
+endif()
