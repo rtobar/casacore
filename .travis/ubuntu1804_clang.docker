@@ -15,7 +15,10 @@ RUN docker-apt-install \
     libreadline6-dev \
     libhdf5-serial-dev \
     libboost-dev \
+    libboost-filesystem-dev \
     libboost-python-dev \
+    libboost-system-dev \
+    libboost-test-dev \
     python-numpy \
     python3-numpy
 ADD . /code
