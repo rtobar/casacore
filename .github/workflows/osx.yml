@@ -2,7 +2,7 @@ name: macOS
 
 on:
   push:
-    branches: [ master, macos-runner ]
+    branches: [ master, macos-runner, use-sscache-in-gha ]
     tags: [ "*" ]
   pull_request:
     branches: [ master ]
