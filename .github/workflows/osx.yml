@@ -10,10 +10,15 @@ on:
 jobs:
   osx:
     runs-on: macos-12
+    env:
+      SCCACHE_GHA_ENABLED: "true"
 
     steps:
       - name: checkout
         uses: actions/checkout@v2
+
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.3
 
       - name: install homebrew deps
         run: brew install fftw hdf5 boost-python3 cfitsio wcslib wget gfortran gsl ninja
@@ -48,6 +53,8 @@ jobs:
             -DUSE_HDF5=ON \
             -DBUILD_PYTHON=OFF \
             -DBUILD_PYTHON3=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DPython3_EXECUTABLE=`which python3.11` \
             -DBoost_NO_BOOST_CMAKE=True \
             -DCMAKE_Fortran_COMPILER=gfortran-13 \
