@@ -58,7 +58,8 @@ jobs:
             -DPython3_EXECUTABLE=`which python3.11` \
             -DBoost_NO_BOOST_CMAKE=True \
             -DCMAKE_Fortran_COMPILER=gfortran-13 \
-            -DDATA_DIR=. ..
+            -DDATA_DIR=. \
+            ..
 
       - name: build
         run: cmake --build build
